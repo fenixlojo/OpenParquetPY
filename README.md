@@ -23,6 +23,20 @@ Los datos se procesan localmente. Los archivos seleccionados se copian a una car
 
 Puerto alternativo: `python app.py --port 8766`. Para iniciar sin navegador: `python app.py --no-browser`.
 
+## Generar Parquet a partir de CSV o Excel
+
+El botón **Generar Parquet**, junto a **Abrir archivo**, acepta CSV, TSV, XLSX, XLS y XLSM. Seleccioná el archivo y una hoja si es Excel. Podés indicar si la primera fila contiene encabezados y conservar todas las columnas como texto; si no, DuckDB infiere tipos a partir de todos los datos. Los CSV admiten separadores coma, punto y coma, tabulador o barra vertical y codificación UTF-8 o Windows-1252.
+
+La barra muestra el avance por etapas reales: lectura, compresión, preparación y apertura. La conversión corre en segundo plano en el servidor local, con hasta dos conversiones simultáneas. Al terminar se solicita la descarga de un Parquet ZSTD y se abre automáticamente en el visor. Queda un resumen con tamaños de origen/destino, ahorro en bytes y porcentaje, o aumento cuando el resultado es mayor. Para Excel, la comparación usa el libro completo aunque el resultado solo contiene la hoja seleccionada.
+
+Se exportan los valores de las celdas; no estilos, gráficos ni macros. Las filas completamente vacías de Excel se omiten. Las fórmulas no se recalculan: se usan resultados guardados y se rechazan los errores detectados y las fórmulas XLSX/XLSM sin resultado guardado. Los identificadores numéricos que necesitan ceros de formato deben convertirse a texto en Excel antes de importarlos. No se modifica el archivo original.
+
+La conversión usa `openpyxl` para XLSX/XLSM y `xlrd` para XLS. `start.bat` instala las dependencias faltantes; para actualizar manualmente: `python -m pip install -r requirements.txt`. Los archivos de origen se copian al directorio temporal local y se eliminan al cerrar el conversor. Los Parquets generados y sus enlaces de descarga permanecen hasta cerrar el servidor. El navegador administra la carpeta de descarga según sus preferencias; si no guarda automáticamente, usá el enlace del resumen.
+
+Límite de carga: 2 GB. El límite de memoria de DuckDB es 512 MB, pero la lectura de Excel también requiere memoria de Python y puede fallar antes. No hay un tamaño máximo de Excel garantizado para cualquier equipo.
+
+Pruebas de conversión y SQL: `python -m unittest -v test_conversion test_sql`.
+
 ## Consultas SQL
 
 Abrí un archivo y elegí la pestaña **SQL**. `SELECT` y `FROM parquet` están fijos. En **Columnas SQL** dejá `*` o escribí columnas y expresiones. En **Cláusulas SQL** podés escribir:

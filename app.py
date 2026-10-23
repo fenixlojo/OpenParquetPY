@@ -13,6 +13,7 @@ import duckdb
 
 ROOT = Path(__file__).resolve().parent
 FILES = {}
+DOWNLOADS = {}
 LOCK = threading.Lock()
 TEMP = tempfile.TemporaryDirectory(prefix="openparquets-")
 
@@ -57,6 +58,13 @@ def register(path, name=None):
     return info
 
 
+def register_generated(path, name):
+    info = register(path, name)
+    with LOCK:
+        DOWNLOADS[info['id']] = (Path(path), info)
+    return info
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
@@ -78,7 +86,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.trusted():
             return self.send({"error": "Origen no permitido"}, 403)
         url = urlparse(self.path)
-        static = {"/": ("index.html", "text/html"), "/viewer.js": ("viewer.js", "text/javascript"), "/sql.js": ("sql.js", "text/javascript")}
+        static = {"/": ("index.html", "text/html"), "/viewer.js": ("viewer.js", "text/javascript"), "/sql.js": ("sql.js", "text/javascript"), "/conversion-ui.js": ("conversion-ui.js", "text/javascript"), "/convert-adapter.js": ("convert-adapter.js", "text/javascript")}
         if url.path in static:
             filename, mime = static[url.path]
             body = (ROOT / filename).read_bytes()
@@ -87,6 +95,29 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             return self.wfile.write(body)
+        if url.path in ("/api/convert/job", "/api/download"):
+            try:
+                args = {k: v[0] for k, v in parse_qs(url.query).items()}
+                if url.path == "/api/convert/job":
+                    from conversion import job_status
+                    return self.send(job_status(args['id']))
+                with LOCK:
+                    if args['id'] not in DOWNLOADS:
+                        raise ValueError('Descarga no encontrada.')
+                    path, info = DOWNLOADS[args['id']]
+                from urllib.parse import quote as url_quote
+                with path.open('rb') as file:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/vnd.apache.parquet')
+                    self.send_header('Content-Disposition', "attachment; filename=archivo.parquet; filename*=UTF-8''" + url_quote(info['name'], safe=''))
+                    self.send_header('Content-Length', str(path.stat().st_size))
+                    self.send_header('Cache-Control', 'no-store')
+                    self.end_headers()
+                    while chunk := file.read(1024**2):
+                        self.wfile.write(chunk)
+                return
+            except (ValueError, KeyError, OSError) as error:
+                return self.send({'error': str(error)}, 400)
         if url.path != "/api/rows":
             return self.send({"error": "No encontrado"}, 404)
         try:
@@ -116,7 +147,37 @@ class Handler(BaseHTTPRequestHandler):
         upload_path = None
         try:
             length = int(self.headers.get("Content-Length", 0))
-            if self.path in ("/api/query", "/api/close"):
+            if self.path == '/api/convert/source':
+                from urllib.parse import unquote
+                from conversion import inspect_source
+                import uuid
+                name = unquote(self.headers.get('X-Filename', 'archivo.csv'))
+                suffix = Path(name).suffix.lower()
+                if suffix not in ('.csv', '.tsv', '.xls', '.xlsx', '.xlsm'):
+                    raise ValueError('Elegí un CSV, TSV o Excel (.xlsx, .xls, .xlsm).')
+                if length <= 0 or length > 2 * 1024**3:
+                    raise ValueError('El archivo está vacío o supera el límite de 2 GB.')
+                upload_path = Path(TEMP.name) / (uuid.uuid4().hex + suffix)
+                with upload_path.open('wb') as dest:
+                    remaining = length
+                    while remaining:
+                        chunk = self.rfile.read(min(1024**2, remaining))
+                        if not chunk:
+                            raise ValueError('Transferencia incompleta.')
+                        dest.write(chunk)
+                        remaining -= len(chunk)
+                result = inspect_source(upload_path, name)
+            elif self.path in ('/api/convert/start', '/api/convert/discard'):
+                if length <= 0 or length > 16384:
+                    raise ValueError('Solicitud demasiado grande o vacía.')
+                args = json.loads(self.rfile.read(length))
+                from conversion import start_job, discard_source
+                if self.path == '/api/convert/discard':
+                    discard_source(args['token'])
+                    result = {'discarded': True}
+                else:
+                    result = start_job(args['token'], args.get('options', {}), TEMP.name, register_generated)
+            elif self.path in ("/api/query", "/api/close"):
                 if length <= 0 or length > 100000:
                     raise ValueError("Solicitud demasiado grande o vacía")
                 args = json.loads(self.rfile.read(length))
