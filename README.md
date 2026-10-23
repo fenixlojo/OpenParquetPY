@@ -22,3 +22,22 @@ Incluye búsqueda literal en todas las columnas, orden ascendente/descendente, p
 Los datos se procesan localmente. Los archivos seleccionados se copian a una carpeta temporal que se limpia al cerrar normalmente el servidor. Las rutas locales se leen directamente. No requiere servicios externos.
 
 Puerto alternativo: `python app.py --port 8766`. Para iniciar sin navegador: `python app.py --no-browser`.
+
+## Consultas SQL
+
+Abrí un archivo y elegí la pestaña **SQL**. `SELECT` y `FROM parquet` están fijos. En **Columnas SQL** dejá `*` o escribí columnas y expresiones. En **Cláusulas SQL** podés escribir:
+
+```sql
+WHERE persona_id = 42325
+ORDER BY persona_id DESC
+```
+
+El botón **Ejecutar consulta** o Ctrl / Cmd + Enter aplica la consulta. La columna usada debe existir en el archivo. El resultado tiene sus propias columnas y paginación; las modificaciones del editor no se aplican hasta ejecutar. **Ver todo** restaura la consulta completa; **Contar filas** ejecuta `COUNT(*) AS total`. La pestaña Datos permite volver al contenido original. Al cambiar de archivo se reinicia el editor.
+
+También se admiten agregaciones: columnas `persona_id, COUNT(*) AS cantidad`; cláusulas `GROUP BY persona_id HAVING COUNT(*) > 1 ORDER BY cantidad DESC LIMIT 20`.
+
+Es SQL de DuckDB, con la sintaxis común de filtros de MySQL e identificadores entre backticks. No emula todas las funciones y reglas de MySQL. Se permiten SELECT, expresiones, WHERE, GROUP BY, HAVING, ORDER BY y LIMIT/OFFSET; no subconsultas, JOIN, UNION, otras tablas, escrituras ni múltiples sentencias. No uses comentarios, punto y coma ni escapes con barra invertida. El texto se escribe entre comillas simples y los apóstrofos se duplican: `'O''Brien'`. Los identificadores especiales van entre comillas dobles o backticks.
+
+El Parquet no se modifica. Las consultas locales restringen el acceso de archivos al Parquet seleccionado y tienen un tiempo máximo aproximado de 30 segundos y el límite de memoria del visor. Los módulos `viewer.js` y `sql.js` se sirven desde la app local; no requieren Node.js.
+
+Pruebas de API, filtros, paginación, agrupaciones y restricciones: `python -m unittest -v test_sql`.

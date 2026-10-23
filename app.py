@@ -78,10 +78,12 @@ class Handler(BaseHTTPRequestHandler):
         if not self.trusted():
             return self.send({"error": "Origen no permitido"}, 403)
         url = urlparse(self.path)
-        if url.path == "/":
-            body = (ROOT / "index.html").read_bytes()
+        static = {"/": ("index.html", "text/html"), "/viewer.js": ("viewer.js", "text/javascript"), "/sql.js": ("sql.js", "text/javascript")}
+        if url.path in static:
+            filename, mime = static[url.path]
+            body = (ROOT / filename).read_bytes()
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", mime + "; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             return self.wfile.write(body)
@@ -114,7 +116,20 @@ class Handler(BaseHTTPRequestHandler):
         upload_path = None
         try:
             length = int(self.headers.get("Content-Length", 0))
-            if self.path == "/api/open":
+            if self.path in ("/api/query", "/api/close"):
+                if length <= 0 or length > 100000:
+                    raise ValueError("Solicitud demasiado grande o vacía")
+                args = json.loads(self.rfile.read(length))
+                if self.path == "/api/close":
+                    with LOCK:
+                        FILES.pop(args["id"], None)
+                    result = {"closed": True}
+                else:
+                    from sql_query import run_query
+                    path, info = FILES[args["id"]]
+                    with connect(path) as db:
+                        result = run_query(db, path, args)
+            elif self.path == "/api/open":
                 if length > 16384:
                     raise ValueError("Ruta demasiado larga")
                 result = register(json.loads(self.rfile.read(length))["path"])
